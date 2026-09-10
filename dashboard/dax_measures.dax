@@ -1,0 +1,173 @@
+// ==============================================================================
+// POWER BI DAX MEASURES - FRAUD DETECTION & FINANCIAL AUDIT DASHBOARD
+// Model: Star Schema (fact_transactions, dim_vendor, dim_category, dim_date)
+// ==============================================================================
+
+// ------------------------------------------------------------------------------
+// 1. CORE VOLUME & VALUE MEASURES
+// ------------------------------------------------------------------------------
+
+Total Transactions = 
+COUNTROWS('fact_transactions')
+
+Total Value = 
+SUM('fact_transactions'[amount])
+
+Avg Transaction Value = 
+AVERAGE('fact_transactions'[amount])
+
+Max Transaction Value = 
+MAX('fact_transactions'[amount])
+
+Median Transaction Value = 
+MEDIAN('fact_transactions'[amount])
+
+// ------------------------------------------------------------------------------
+// 2. AUDIT & ANOMALY KPI MEASURES
+// ------------------------------------------------------------------------------
+
+Flagged Transactions = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[is_flagged] = TRUE()
+)
+
+Flagged Value = 
+CALCULATE(
+    SUM('fact_transactions'[amount]),
+    'fact_transactions'[is_flagged] = TRUE()
+)
+
+Anomaly % = 
+DIVIDE([Flagged Transactions], [Total Transactions], 0)
+
+Flagged Value % = 
+DIVIDE([Flagged Value], [Total Value], 0)
+
+Avg Anomaly Score = 
+AVERAGE('fact_transactions'[anomaly_score])
+
+High & Critical Risk Txns = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[risk_level] IN {"HIGH", "CRITICAL"}
+)
+
+Critical Risk Value = 
+CALCULATE(
+    SUM('fact_transactions'[amount]),
+    'fact_transactions'[risk_level] = "CRITICAL"
+)
+
+// ------------------------------------------------------------------------------
+// 3. ANOMALY BREAKDOWN BY SIGNAL TYPE
+// ------------------------------------------------------------------------------
+
+Duplicates Count = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[flag_duplicate] = TRUE()
+)
+
+Exact Duplicates Count = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[flag_exact_duplicate] = TRUE()
+)
+
+Near Duplicates Count = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[flag_near_duplicate] = TRUE()
+)
+
+Large Transaction Count = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[flag_large_transaction] = TRUE()
+)
+
+Vendor Spike Count = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[flag_vendor_spike] = TRUE()
+)
+
+Velocity Burst Count = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[flag_velocity] = TRUE()
+)
+
+Unusual Timing Count = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[flag_unusual_timing] = TRUE()
+)
+
+Multivariate Outlier Count = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[flag_multivariate_outlier] = TRUE()
+)
+
+High Concentration Count = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[flag_concentration] = TRUE()
+)
+
+// ------------------------------------------------------------------------------
+// 4. MODEL EVALUATION & GROUND TRUTH VALIDATION (PaySim isFraud)
+// ------------------------------------------------------------------------------
+
+Ground Truth Fraud Count = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[is_fraud_ground_truth] = 1
+)
+
+True Positives (Caught Fraud) = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[is_fraud_ground_truth] = 1,
+    'fact_transactions'[is_flagged] = TRUE()
+)
+
+False Negatives (Missed Fraud) = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[is_fraud_ground_truth] = 1,
+    'fact_transactions'[is_flagged] = FALSE()
+)
+
+False Positives (Clean Flagged) = 
+CALCULATE(
+    COUNTROWS('fact_transactions'),
+    'fact_transactions'[is_fraud_ground_truth] = 0,
+    'fact_transactions'[is_flagged] = TRUE()
+)
+
+Recall Rate % = 
+DIVIDE([True Positives (Caught Fraud)], [Ground Truth Fraud Count], 0)
+
+Precision Rate % = 
+DIVIDE([True Positives (Caught Fraud)], [Flagged Transactions], 0)
+
+// ------------------------------------------------------------------------------
+// 5. CONDITIONAL FORMATTING & DYNAMIC TITLES
+// ------------------------------------------------------------------------------
+
+Risk Color Indicator = 
+SWITCH(
+    SELECTEDVALUE('fact_transactions'[risk_level]),
+    "CRITICAL", "#D32F2F",    // Vibrant Red
+    "HIGH",     "#F57C00",    // Vibrant Orange
+    "MEDIUM",   "#FBC02D",    // Amber
+    "LOW",      "#388E3C",    // Green
+    "#9E9E9E"                 // Grey
+)
+
+Selected Vendor Risk Status = 
+VAR RiskTier = SELECTEDVALUE('dim_vendor'[vendor_risk_tier], "Multiple Vendors")
+RETURN "Vendor Risk Profile: " & RiskTier

@@ -1,0 +1,16 @@
+﻿# Python and data files
+*.pyc
+__pycache__/
+.env
+*.env
+.DS_Store
+# Data directories
+data/raw/
+data/processed/
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+# Output files
+*.parquet
+*.csv
+# IDE files
+.vscode/
