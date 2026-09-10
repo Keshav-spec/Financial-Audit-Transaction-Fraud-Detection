@@ -2,6 +2,15 @@
 
 An end-to-end financial transaction audit and fraud detection pipeline. The system processes raw banking transactions, runs data quality audits, executes a multi-signal anomaly detection engine (rule-based + unsupervised machine learning), models the results into an analytics-ready star schema, and feeds a Power BI reporting suite.
 
+<table>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/c34b9d8b-265b-42e5-bb67-b7384eac854f" width="100%"></td>
+    <td><img src="https://github.com/user-attachments/assets/08298f04-edec-4b5d-8188-66ae61f72748" width="100%"></td>
+    <td><img src="https://github.com/user-attachments/assets/3a4386da-e939-4e66-ab95-4b23fa906f23" width="100%"></td>
+  </tr>
+</table>
+
+
 ---
 
 ## Repository Structure
