@@ -2,8 +2,6 @@
 
 An end-to-end financial transaction audit and fraud detection pipeline. The system processes raw banking transactions, runs data quality audits, executes a multi-signal anomaly detection engine (rule-based + unsupervised machine learning), models the results into an analytics-ready star schema, and feeds a Power BI reporting suite.
 
-**Dashboard status:** 3 of 5 planned Power BI pages are built (Executive Audit Overview, Vendor Risk & Counterparty Intelligence, Transaction Trends & Outliers). Category Distribution & Concentration and Data Quality & Pipeline Health are not yet built.
-
 ---
 
 ## Repository Structure
@@ -117,8 +115,6 @@ Seven independent anomaly signals:
 | 1. Executive Audit Overview | KPI cards (total transactions, total value, flagged value, anomaly %, high/critical risk count), transaction volume + anomaly % trend, risk-level donut | Built |
 | 2. Vendor Risk & Counterparty Intelligence | Top suspicious vendors by flagged value, drill-through transaction table, vendor risk profile card | Built |
 | 3. Transaction Trends & Outliers | Unusual-timing distribution by hour, amount vs. anomaly-score scatter by risk tier | Built |
-| 4. Category Distribution & Concentration | Spend treemap by category, HHI concentration histogram | Not built |
-| 5. Data Quality & Pipeline Health | Completeness report, confusion matrix, schema validation cards | Not built |
 
 ### Phase 7: Documentation & Trade-off Analysis
 - `README.md` — architecture, execution steps, thresholds (this file).
