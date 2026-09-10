@@ -1,150 +1,201 @@
-# 🛡️ Financial Audit & Transaction Fraud Detection Pipeline
-### Enterprise-Grade Anomaly Detection, SQL Warehousing & Power BI Analytics
+# Financial Audit & Transaction Fraud Detection: Project Walkthrough
 
-An end-to-end financial transaction monitoring and audit analytics system designed to detect payment fraud, velocity bursts, counterparty concentration, and multivariate anomalies across millions of banking records.
+An end-to-end financial transaction audit and fraud detection pipeline. The system processes raw banking transactions, runs data quality audits, executes a multi-signal anomaly detection engine (rule-based + unsupervised machine learning), models the results into an analytics-ready star schema, and feeds a Power BI reporting suite.
+
+**Dashboard status:** 3 of 5 planned Power BI pages are built (Executive Audit Overview, Vendor Risk & Counterparty Intelligence, Transaction Trends & Outliers). Category Distribution & Concentration and Data Quality & Pipeline Health are not yet built.
 
 ---
 
-## 🏗️ Architecture Overview
+## Repository Structure
 
-```mermaid
-flowchart TD
-    subgraph Phase1["Phase 1: Ingestion & Setup"]
-        RAW[("Kaggle PaySim / Synthetic Ingestion")] --> STG[("data/raw/")]
-    end
-
-    subgraph Phase23["Phase 2 & 3: Preprocessing & Data Quality"]
-        STG --> DQ["Pre-cleaning DQ Audit<br/>(Schema, Range, Balance Math)"]
-        DQ --> CLEAN["Standardization & Datetime Parsing<br/>(Deduplication & Imputation Flags)"]
-        CLEAN --> PROCESSED[("data/processed/clean_transactions")]
-    end
-
-    subgraph Phase4["Phase 4: Anomaly Detection Engine"]
-        PROCESSED --> DUP["Exact & Near Duplicates"]
-        PROCESSED --> IQR["Category-Relative IQR / Z-Score"]
-        PROCESSED --> TIME["Unusual Timing / Off-Hours"]
-        PROCESSED --> SPIKE["Vendor Rolling 7-Day Spikes"]
-        PROCESSED --> VEL["User Velocity Bursts"]
-        PROCESSED --> ISO["Multivariate Isolation Forest"]
-        PROCESSED --> HHI["Concentration (HHI Index)"]
-        
-        DUP & IQR & TIME & SPIKE & VEL & ISO & HHI --> COMPOSITE["Composite Scoring Engine<br/>(Score 0-100 & Risk Tiers)"]
-    end
-
-    subgraph Phase5["Phase 5: Dimensional Star-Schema"]
-        COMPOSITE --> STAR["Star Schema Generator"]
-        STAR --> FACT["fact_transactions"]
-        STAR --> DIM_V["dim_vendor"]
-        STAR --> DIM_C["dim_category"]
-        STAR --> DIM_D["dim_date"]
-        STAR --> SQLITE[("SQLite Data Warehouse<br/>audit_warehouse.db")]
-    end
-
-    subgraph Phase6["Phase 6: Power BI Analytics"]
-        FACT & DIM_V & DIM_C & DIM_D --> PBI["Power BI Dashboard<br/>5 Multi-Tier Audit Pages"]
-    end
+```
+audit/
+├── data/
+│   ├── raw/
+│   │   └── synthetic_paysim.csv        # 50,145 records with injected anomalies
+│   └── processed/
+│       ├── audit_warehouse.db          # Indexed SQLite data warehouse
+│       ├── clean_transactions.csv      # Preprocessed & deduplicated transactions
+│       ├── clean_transactions.parquet  # High-performance parquet format
+│       ├── data_quality_report.csv     # Column completeness & range audit
+│       ├── dim_category.csv / .parquet # Category dimension (5 payment types)
+│       ├── dim_date.csv / .parquet     # Calendar date dimension
+│       ├── dim_vendor.csv / .parquet   # Merchant dimension with risk tiers
+│       ├── fact_transactions.csv       # Star-schema fact table with 7 flags
+│       └── flagged_transactions.csv    # Scored transaction records
+├── sql/
+│   └── schema_and_views.sql            # CTE staging, clean views, reporting views
+├── scripts/
+│   ├── preprocess.py                   # Datetime parsing, standardization, dedup
+│   ├── anomaly_detection.py            # 7-signal anomaly engine & composite scoring
+│   ├── export.py                       # Star-schema dimensional modeling & SQLite writer
+│   ├── run_pipeline.py                 # Master CLI pipeline orchestrator
+│   ├── generate_synthetic_data.py      # Controlled anomaly test fixture generator
+│   ├── sample_paysim.py                # Memory-efficient stratified sampler
+│   ├── test_sql.py                     # SQL views execution & test script
+│   └── utils.py                        # Shared data utilities
+├── dashboard/
+│   ├── dax_measures.dax                # 20+ production DAX measures for Power BI
+│   └── powerbi_setup_guide.md          # Dashboard layout & visual specs
+├── notebooks/
+│   └── 01_financial_audit_and_fraud_detection.ipynb  # Interactive EDA & model evaluation
+├── tests/
+│   └── test_pipeline.py                # Automated pytest suite (5 passing tests)
+├── docs/
+│   └── false_positives_tradeoffs.md    # Asymmetric cost matrix & interview guide
+├── requirements.txt                    # Pinned project dependencies
+└── README.md
 ```
 
 ---
 
-## 📊 Anomaly Signals & Detection Thresholds
+## Pipeline Architecture
 
-| Anomaly Signal | Methodology / Model | Operational Threshold | Anomaly Weight |
-|---|---|---|---|
-| **Exact Duplicates** | Identical record hashing | Exact match on `user`, `dest`, `amount`, `step`, `type` | 25 pts |
-| **Near-Duplicates** | Temporal proximity window | Same `user`, `dest`, and `amount` within $\le 2$ hours | 25 pts |
-| **Large Transactions** | Category-segmented IQR & Z-score | $Amount > Q3 + 2.5 \times IQR$ per transaction category | 20 pts |
-| **Vendor Activity Spike** | Rolling historical baseline | Daily transactions $> \mu_{7\text{-day}} + 2.5 \times \sigma_{7\text{-day}}$ | 20 pts |
-| **Velocity Burst** | Sliding temporal window | $\ge 3$ transactions by same user within $\le 2$ hours | 15 pts |
-| **Multivariate Outlier** | Unsupervised Isolation Forest | Top $1.5\%$ anomalies across amount, velocity, hour, balances | 15 pts |
-| **Unusual Timing** | Off-hours & vendor profiling | 1:00 AM – 5:00 AM window OR outside vendor 5th–95th percentile | 10 pts |
-| **Spend Concentration** | Herfindahl-Hirschman Index (HHI) | User $HHI \ge 0.85$ with $\ge 3$ transactions | 10 pts |
-
-### Composite Risk Tiers:
-- **`CRITICAL` (Score 75–100):** Immediate transaction freeze and mandatory AML review.
-- **`HIGH` (Score 45–74):** Automated queue to Tier-1 auditor with audit reason codes.
-- **`MEDIUM` (Score 20–44):** Step-up biometric / OTP authentication.
-- **`LOW` (Score 0–19):** Frictionless straight-through processing.
+```
+Raw transactions (PaySim / synthetic)
+        |
+Preprocessing & enrichment (preprocess.py)
+        |
+Data quality audit (data_quality_report.csv)
+        |
+Anomaly detection engine (anomaly_detection.py) — 7 signals -> composite score
+        |
+Star-schema export (export.py) -> CSV / Parquet / SQLite
+        |
+Power BI dashboard (dashboard/)
+```
 
 ---
 
-## 🚀 Quickstart & Reproduction Guide
+## Phase-by-Phase Implementation
 
-### 1. Prerequisites & Environment
-Ensure Python 3.9+ is installed:
+### Phase 1: Data Acquisition & Environment Setup
+- Configured Kaggle API integration for automated retrieval of the PaySim dataset (~6.3M rows).
+- Added a synthetic generator (`generate_synthetic_data.py`) with controlled anomaly injections — missing values, exact duplicates, temporal near-duplicates, vendor spikes, velocity bursts, extreme amounts — for fast, repeatable verification without needing the full download.
+
+### Phase 2: Preprocessing & Standardization (`scripts/preprocess.py`)
+- Parsed the elapsed `step` counter into calendar datetimes (`timestamp`).
+- Extracted temporal features: `hour_of_day`, `day_of_week`, `is_weekend`, `is_night` (1 AM-5 AM off-hours proxy).
+- Standardized text casing and rounded numeric values to 2 decimal places.
+- Handled missing values with explicit audit flags (`is_missing_amount`, `is_missing_orig_balance`) rather than silent drops.
+- Implemented exact deduplication (`flag_exact_duplicate`) and near-deduplication (`flag_near_duplicate`: same origin user, destination merchant, and amount within a 2-hour window).
+
+### Phase 3: Pre-Cleaning Data Quality Auditing (`data_quality_report.csv`)
+- Automated column-level completeness report (null counts, null %, unique values, datatypes).
+- Schema and domain-logic consistency checks:
+  - Negative amount validation (amount < 0).
+  - Account balance reconciliation (old balance - amount ~ new balance).
+- Findings exported to `data_quality_report.csv`.
+
+### Phase 4: Multi-Signal Anomaly Detection Engine (`scripts/anomaly_detection.py`)
+Seven independent anomaly signals:
+1. **Duplicates** (`flag_duplicate`) — exact and temporal near-duplicates.
+2. **Category outliers** (`flag_large_transaction`) — category-segmented IQR (Q3 + 2.5 x IQR) and log z-scores.
+3. **Unusual timing** (`flag_unusual_timing`) — global off-hours (1 AM-5 AM) and vendor-specific operating-hour distributions.
+4. **Vendor spikes** (`flag_vendor_spike`) — rolling 7-day volume baseline (mean + 2.5 x std).
+5. **Velocity bursts** (`flag_velocity`) — user transacting 3+ times within a 2-hour window.
+6. **Multivariate outliers** (`flag_multivariate_outlier`) — unsupervised Isolation Forest on scaled multidimensional space (amount, hour, step, balance delta).
+7. **Concentration risk** (`flag_concentration`) — Herfindahl-Hirschman Index (HHI >= 0.85).
+
+**Composite scoring:**
+- Normalized score from 0-100 based on signal weights.
+- Segmented into risk tiers: CRITICAL (>=75), HIGH (>=45), MEDIUM (>=20), LOW (<20).
+- Each flagged transaction carries a human-readable `flag_reasons` string for auditor explainability.
+
+### Phase 5: Dimensional Star Schema & SQLite Data Warehouse (`scripts/export.py`)
+- `fact_transactions` — granular transaction line items, surrogate keys, 7 anomaly flags, composite scores, risk levels, and audit reasons.
+- `dim_vendor` — merchant master with brand names, cumulative transaction counts, total volume, flagged rates, and risk ratings (HIGH_RISK, MEDIUM_RISK, STANDARD).
+- `dim_category` — payment type dimension with risk weightings.
+- `dim_date` — calendar date dimension for time intelligence.
+- All tables written to `data/processed/audit_warehouse.db` with indexes on foreign keys.
+
+### Phase 6: Power BI Reporting Suite (`dashboard/`)
+20+ DAX measures in `dashboard/dax_measures.dax` and a 5-page layout guide in `dashboard/powerbi_setup_guide.md`. Build status:
+
+| Page | Contents | Status |
+|---|---|---|
+| 1. Executive Audit Overview | KPI cards (total transactions, total value, flagged value, anomaly %, high/critical risk count), transaction volume + anomaly % trend, risk-level donut | Built |
+| 2. Vendor Risk & Counterparty Intelligence | Top suspicious vendors by flagged value, drill-through transaction table, vendor risk profile card | Built |
+| 3. Transaction Trends & Outliers | Unusual-timing distribution by hour, amount vs. anomaly-score scatter by risk tier | Built |
+| 4. Category Distribution & Concentration | Spend treemap by category, HHI concentration histogram | Not built |
+| 5. Data Quality & Pipeline Health | Completeness report, confusion matrix, schema validation cards | Not built |
+
+### Phase 7: Documentation & Trade-off Analysis
+- `README.md` — architecture, execution steps, thresholds (this file).
+- `docs/false_positives_tradeoffs.md` — asymmetric cost matrices, customer friction, Tier-1 auditor triage, interview discussion framework.
+- `notebooks/01_financial_audit_and_fraud_detection.ipynb` — interactive walkthrough of all 7 phases with plots and model evaluation.
+
+---
+
+## Verification & Test Results
+
+### Automated Unit Tests (pytest)
+```text
+tests/test_pipeline.py::test_data_quality_report PASSED       [ 20%]
+tests/test_pipeline.py::test_clean_pipeline PASSED            [ 40%]
+tests/test_pipeline.py::test_duplicate_detection PASSED       [ 60%]
+tests/test_pipeline.py::test_velocity_burst PASSED            [ 80%]
+tests/test_pipeline.py::test_dimensional_generation PASSED    [100%]
+============================== 5 passed in 3.01s ==============================
+```
+
+### End-to-End Pipeline Execution
+`scripts/run_pipeline.py` on 50,145 synthetic transaction records:
+```text
+===========================================================================
+ PIPELINE EXECUTION SUMMARY
+===========================================================================
+Total Processed Transactions: 50,095
+Flagged Anomalies:            903 (1.80%)
+High / Critical Risk Txns:    357
+Total Execution Time:         6.88 seconds
+===========================================================================
+```
+- 50 missing amounts identified and dropped cleanly with audit logs.
+- 30 exact duplicates and 65 near-duplicates detected.
+- All tables exported to CSV, Parquet, and the indexed SQLite database (`audit_warehouse.db`).
+
+### SQL Data Warehouse Verification
+- **Top risky vendor:** Walgreens Health (M59873), 74.55% flagged ratio.
+- **Category risk breakdown:**
+  - Wire & P2P Transfer: $40,365,261 volume, 528 flagged (5.24% anomaly rate).
+  - Cash Withdrawal: $27,455,031 volume, 213 flagged (1.72% anomaly rate).
+  - Retail & Merchant Payment: $5,804,356 volume, 88 flagged (0.50% anomaly rate).
+- Flag explanations generated as clean, human-readable strings, e.g.: "High Amount vs Category; Abnormal Vendor Spike; High Velocity Burst; Multivariate Outlier; Unusual Timing / Night; Reported Fraud Ground Truth."
+
+---
+
+## Setup & Usage
+
 ```bash
+# 1. Clone / open the project
+cd audit
+
+# 2. Create environment and install dependencies
 pip install -r requirements.txt
-```
 
-### 2. Configure Kaggle Token (Optional for Kaggle PaySim)
-Place your Kaggle API token at `~/.kaggle/access_token` or set the environment variable:
-```bash
-# Windows PowerShell
-$env:KAGGLE_API_TOKEN="KGAT_your_token_here"
-python -m kaggle datasets download -d ealaxi/paysim1 -p ./data/raw --unzip
-```
+# 3. (Optional) Download the real PaySim dataset
+#    Requires ~/.kaggle/kaggle.json API token
+kaggle datasets download -d ealaxi/paysim1 -p data/raw --unzip
 
-### 3. Generate Synthetic Benchmark Dataset
-If you prefer immediate testing or controlled ground-truth injection:
-```bash
-python scripts/generate_synthetic_data.py --rows 50000 --output ./data/raw/synthetic_paysim.csv
-```
+#    Or skip the download and use the synthetic generator instead:
+python scripts/generate_synthetic_data.py
 
-### 4. Execute Master End-to-End Pipeline
-Run the full data quality audit, cleaning, anomaly scoring, and star-schema export:
-```bash
-python scripts/run_pipeline.py --input ./data/raw/synthetic_paysim.csv --outdir ./data/processed
-```
+# 4. Run the full pipeline
+python scripts/run_pipeline.py
 
-### 5. Verify Unit Tests
-Execute the automated test suite with pytest:
-```bash
-python -m pytest -v tests/test_pipeline.py
-```
+# 5. Run tests
+pytest -q
 
-### 6. Query SQLite Data Warehouse
-Verify the star schema and reporting views:
-```bash
-python scripts/test_sql.py
+# 6. Open the exported tables in Power BI
+#    Point Power BI Desktop at data/processed/ (CSV/Parquet) or
+#    data/processed/audit_warehouse.db, then follow
+#    dashboard/powerbi_setup_guide.md and import dashboard/dax_measures.dax
 ```
 
 ---
 
-## 🗄️ Database Architecture (Star-Schema)
-
-The data pipeline outputs to CSV, Parquet, and writes directly to `data/processed/audit_warehouse.db`:
-- **`fact_transactions`**: Granular transaction records, surrogate keys, 7 individual anomaly flags, `anomaly_score`, `risk_level`, and human-readable `flag_reasons`.
-- **`dim_vendor`**: Merchant master table enriched with realistic corporate brands, cumulative volume, flagged transaction counts, and `vendor_risk_tier`.
-- **`dim_category`**: Payment type dimension (`PAYMENT`, `TRANSFER`, `CASH_OUT`, `DEBIT`, `CASH_IN`) with risk profiles.
-- **`dim_date`**: Calendar date dimension (`date_key`, `year`, `quarter`, `month`, `day_of_week`, `is_weekend`).
-- **`data_quality_summary`**: Audited column completeness and null counts before cleaning.
-
-### Pre-built SQL Views
-- `clean_transactions`: Full CTE preprocessing pipeline in SQL.
-- `v_suspicious_transactions`: High-priority alerts ranked by anomaly score.
-- `v_vendor_risk_summary`: Counterparty risk profiling.
-- `v_daily_audit_trend`: Daily volume and anomaly rate overlay.
-- `v_category_risk_breakdown`: Category-level exposure and anomaly rates.
-
----
-
-## 📈 Power BI Reporting Suite
-
-The pipeline provides complete Power BI assets in the `dashboard/` directory:
-- **`dashboard/dax_measures.dax`**: 20+ production-grade DAX measures including `[Anomaly %]`, `[Flagged Value]`, `[Duplicates Count]`, and dynamic risk indicators.
-- **`dashboard/powerbi_setup_guide.md`**: Complete layout guide for all 5 pages:
-  1. **Executive Audit Overview:** KPI scorecards, daily volume/flagged trend, risk tier donut chart.
-  2. **Vendor Risk & Counterparty Intelligence:** Top 15 suspicious vendors, transaction drill-through table with red conditional formatting.
-  3. **Transaction Trends & Outliers:** 24-hour off-hours heatmap, multivariate Isolation Forest scatter plot.
-  4. **Category Distribution & Concentration:** Spend treemap, category anomaly rates, HHI concentration histogram.
-  5. **Data Quality & Pipeline Health:** Pre-pipeline completeness matrix, schema validation cards, confusion matrix.
-
----
-
-## 💡 Strategic Trade-Offs (False Positives vs. False Negatives)
-
-In fraud detection, model evaluation is dominated by **cost asymmetry**:
-- **False Negatives (Missed Fraud):** Cause catastrophic capital losses, regulatory fines, and chargeback fees.
-- **False Positives (False Alarms):** Create customer friction, abandoned carts, and human auditor investigation costs.
-
-Read the detailed write-up: **[docs/false_positives_tradeoffs.md](file:///c:/Users/vinay/Desktop/Projects/data%20science/audit/docs/false_positives_tradeoffs.md)**.
+## Next Steps
+- Build Power BI page 4: Category Distribution & Concentration (spend treemap, HHI histogram).
+- Build Power BI page 5: Data Quality & Pipeline Health (completeness report, confusion matrix, schema validation cards).
+- Re-run the pipeline against the full PaySim download (6.3M rows) rather than the synthetic/sampled set, and refresh the dashboard.
